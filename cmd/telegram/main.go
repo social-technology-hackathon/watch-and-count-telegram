@@ -10,18 +10,20 @@ import (
 	"vybar/tg"
 	"vybar/tg/message"
 
-	"github.com/davecgh/go-spew/spew"
 	"github.com/sirupsen/logrus"
 )
 
 var (
-	token = flag.String("token", "", "Bot API token")
+	token   = flag.String("token", "", "Bot API token")
+	verbose = flag.Bool("verbose", false, "turns verbosing on")
 )
 
 func main() {
 	flag.Parse()
 
-	logrus.SetLevel(logrus.DebugLevel)
+	if *verbose {
+		logrus.SetLevel(logrus.DebugLevel)
+	}
 
 	if token == nil || *token == "" {
 		panic("no token specified")
@@ -54,12 +56,6 @@ func main() {
 			continue
 		}
 
-		if upd.Message.Text != nil && *upd.Message.Text == "/stop" {
-			logrus.Debug("shutdown bot")
-			cancel()
-			continue
-		}
-
 		txt := ""
 		if upd.Message.Text != nil {
 			txt = *upd.Message.Text
@@ -69,6 +65,5 @@ func main() {
 		if _, err := api.SendMessage(msg); err != nil {
 			logrus.Error(err)
 		}
-		spew.Dump(msg)
 	}
 }
