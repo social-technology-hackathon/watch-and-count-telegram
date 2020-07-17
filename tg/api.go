@@ -11,6 +11,7 @@ import (
 	"net/url"
 	"path"
 	"strconv"
+	"strings"
 	"vybar/tg/message"
 	"vybar/tg/user"
 
@@ -105,7 +106,8 @@ func (api *API) newRequest(ctx context.Context, method, relURL string, body inte
 
 	u.Path = path.Join(fmt.Sprintf("bot%s", api.token), u.Path)
 	u = tgBaseURL.ResolveReference(u)
-	api.logger.Debugf("tg: %s -> %s", method, u.String())
+
+	api.logger.Debugf("tg: %s -> %s", method, strings.ReplaceAll(u.String(), api.token, "*****"))
 
 	req, err := http.NewRequestWithContext(ctx, method, u.String(), bodyReader)
 	req.Header = headers
