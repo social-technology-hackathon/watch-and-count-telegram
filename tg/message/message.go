@@ -3,18 +3,20 @@ package message
 import (
 	"time"
 	"vybar/tg/chat"
+	"vybar/tg/file"
 	"vybar/tg/user"
 )
 
 type Message struct {
-	ID             int        `json:"message_id,omitempty"`
-	From           *user.User `json:"from,omitempty"`
-	Date           int        `json:"date,omitempty"`
-	DateTime       time.Time  `json:"-"`
-	ForwardFrom    *user.User `json:"forward_from"`
-	Text           *string    `json:"text,omitempty"`
-	Chat           chat.Chat  `json:"chat"`
-	ReplyToMessage *Message   `json:"reply_to_message,omitempty"`
+	ID             int               `json:"message_id,omitempty"`
+	From           *user.User        `json:"from,omitempty"`
+	Date           int               `json:"date,omitempty"`
+	DateTime       time.Time         `json:"-"`
+	ForwardFrom    *user.User        `json:"forward_from"`
+	Text           *string           `json:"text,omitempty"`
+	Chat           chat.Chat         `json:"chat"`
+	ReplyToMessage *Message          `json:"reply_to_message,omitempty"`
+	Photo          []*file.PhotoSize `json:"photo"`
 }
 
 type Option func(*Message)

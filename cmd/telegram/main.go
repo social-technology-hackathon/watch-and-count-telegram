@@ -4,12 +4,18 @@ import (
 	"context"
 	"flag"
 	"fmt"
+	"io"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"syscall"
 	"vybar/tg"
+	"vybar/tg/file"
 	"vybar/tg/message"
 
+	"github.com/google/uuid"
+
+	"github.com/davecgh/go-spew/spew"
 	"github.com/sirupsen/logrus"
 )
 
@@ -64,6 +70,38 @@ func main() {
 		msg := message.Text(upd.Message.Chat.ID, fmt.Sprintf("echo: %s", txt), message.InReplyTo(upd.Message.ID))
 		if _, err := api.SendMessage(msg); err != nil {
 			logrus.Error(err)
+		}
+
+		if upd.Message.Photo != nil {
+			logrus.Debug("got photo")
+			spew.Dump(upd.Message.Photo)
+			var maxSizeFile *file.PhotoSize
+			maxSize := 0
+			for _, ps := range upd.Message.Photo {
+				s := ps.Width * ps.Height
+				if s > maxSize {
+					maxSize = s
+					maxSizeFile = ps
+				}
+			}
+
+			if maxSizeFile != nil {
+				rdr, err := api.GetFD(maxSizeFile.ID)
+				if err != nil {
+					logrus.Error(err)
+					continue
+				}
+				fname := uuid.New()
+				f, err := os.Create(filepath.Join("media", fmt.Sprintf("%s.jpg", fname.String())))
+				if err != nil {
+					logrus.Error(err)
+				}
+				io.Copy(f, rdr)
+				rdr.Close()
+				if err := f.Close(); err != nil {
+					logrus.Error(err)
+				}
+			}
 		}
 	}
 }

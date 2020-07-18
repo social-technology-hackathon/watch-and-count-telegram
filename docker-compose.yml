@@ -4,3 +4,6 @@ services:
   telegram:
     build:
       context: .
+
+    volumes:
+      - ./media:/media

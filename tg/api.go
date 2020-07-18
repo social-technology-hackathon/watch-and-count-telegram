@@ -12,10 +12,10 @@ import (
 	"path"
 	"strconv"
 	"strings"
+	"vybar/tg/file"
 	"vybar/tg/message"
 	"vybar/tg/user"
 
-	"github.com/davecgh/go-spew/spew"
 	"github.com/sirupsen/logrus"
 )
 
@@ -84,6 +84,38 @@ type BotUser struct {
 	SupportsInlineQueries   bool `json:"supports_inline_queries"`
 }
 
+type tgFile struct {
+	r *http.Response
+}
+
+func (f *tgFile) Read(b []byte) (int, error) {
+	return f.r.Body.Read(b)
+}
+
+func (f *tgFile) Close() error {
+	io.Copy(ioutil.Discard, f.r.Body)
+	return f.r.Body.Close()
+}
+
+var (
+	_ io.ReadCloser = (*tgFile)(nil)
+)
+
+func (api *API) newFileRequest(ctx context.Context, filePath string) (*http.Request, error) {
+	u, err := url.Parse(filePath)
+	if err != nil {
+		return nil, err
+	}
+
+	u.Path = path.Join("file", fmt.Sprintf("bot%s", api.token), u.Path)
+	u = tgBaseURL.ResolveReference(u)
+
+	api.logger.Debugf("tg: GET -> %s", strings.ReplaceAll(u.String(), api.token, "*****"))
+
+	req, err := http.NewRequestWithContext(ctx, "GET", u.String(), nil)
+	return req, err
+}
+
 func (api *API) newRequest(ctx context.Context, method, relURL string, body interface{}) (*http.Request, error) {
 	var bodyReader io.Reader
 	headers := make(http.Header)
@@ -110,9 +142,12 @@ func (api *API) newRequest(ctx context.Context, method, relURL string, body inte
 	api.logger.Debugf("tg: %s -> %s", method, strings.ReplaceAll(u.String(), api.token, "*****"))
 
 	req, err := http.NewRequestWithContext(ctx, method, u.String(), bodyReader)
+	if err != nil {
+		return nil, err
+	}
 	req.Header = headers
 	api.logger.Debugf("tg: headers: %+v", headers)
-	return req, err
+	return req, nil
 }
 
 type tgResponse struct {
@@ -255,8 +290,6 @@ func (api *API) SendMessage(msg *message.Message) (*message.Message, error) {
 		req.ReplyToMessageID = msg.ReplyToMessage.ID
 	}
 
-	spew.Dump(req)
-
 	r, err := api.newRequest(context.Background(), "POST", "sendMessage", &req)
 	if err != nil {
 		return nil, err
@@ -267,4 +300,45 @@ func (api *API) SendMessage(msg *message.Message) (*message.Message, error) {
 		return nil, err
 	}
 	return &resp, nil
+}
+
+func (api *API) GetFile(fileID string) (*file.File, error) {
+	req := struct {
+		FileID string `json:"file_id"`
+	}{
+		FileID: fileID,
+	}
+
+	r, err := api.newRequest(context.Background(), "POST", "getFile", &req)
+	if err != nil {
+		return nil, err
+	}
+
+	var resp file.File
+	if err := api.do(r, &resp); err != nil {
+		return nil, err
+	}
+	return &resp, nil
+}
+
+func (api *API) GetFD(fileID string) (io.ReadCloser, error) {
+	f, err := api.GetFile(fileID)
+	if err != nil {
+		return nil, err
+	}
+
+	if f.FilePath == nil {
+		return nil, fmt.Errorf("tg: telegram servers does not return file_path")
+	}
+
+	req, err := api.newFileRequest(context.Background(), *f.FilePath)
+	if err != nil {
+		return nil, err
+	}
+
+	resp, err := api.httpClient.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	return &tgFile{resp}, nil
 }
