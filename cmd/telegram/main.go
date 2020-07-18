@@ -112,7 +112,21 @@ func main() {
 		logrus.Info("Shutdown an app")
 	}()
 
-	ch, err := api.GetUpdatesChan(ctx, 0)
+	bot := TGBot{
+		api:         api,
+		fileStorage: dst,
+	}
+	bot.Run(ctx)
+
+}
+
+type TGBot struct {
+	api         *tg.API
+	fileStorage destenation.Destenation
+}
+
+func (tg *TGBot) Run(ctx context.Context) {
+	ch, err := tg.api.GetUpdatesChan(ctx, 0)
 	if err != nil {
 		panic(err)
 	}
@@ -128,7 +142,7 @@ func main() {
 		}
 
 		msg := message.Text(upd.Message.Chat.ID, fmt.Sprintf("echo: %s", txt), message.InReplyTo(upd.Message.ID))
-		if _, err := api.SendMessage(msg); err != nil {
+		if _, err := tg.api.SendMessage(msg); err != nil {
 			logrus.Error(err)
 		}
 
@@ -146,25 +160,46 @@ func main() {
 			}
 
 			if maxSizeFile != nil {
-				func() {
-					rdr, err := api.GetFD(maxSizeFile.ID)
-					if err != nil {
-						logrus.Error(err)
-						return
-					}
-					defer rdr.Close()
+				if err := tg.storeFile(maxSizeFile.ID, "jpg"); err != nil {
+					logrus.Error(err)
+					continue
+				}
+			}
+		}
 
-					if _, err := dst.Store(context.Background(), rdr, "jpg"); err != nil {
-						logrus.Error(err)
-						return
-					}
-
-					if err := rdr.Close(); err != nil {
-						logrus.Error(err)
-						return
-					}
-				}()
+		if upd.Message.Video != nil {
+			logrus.Debug("got video")
+			spew.Dump(upd.Message.Video)
+			if err := tg.storeFile(upd.Message.Video.ID, "mp4"); err != nil {
+				logrus.Error(err)
+				respMsg := message.Text(upd.Message.Chat.ID, "При загрузке видео произошла ошибка, попробуйте еще раз", message.InReplyTo(upd.Message.ID))
+				if _, err := tg.api.SendMessage(respMsg); err != nil {
+					logrus.Error(err)
+				}
+				continue
+			}
+			respMsg := message.Text(upd.Message.Chat.ID, "Ваше видео успешно принято", message.InReplyTo(upd.Message.ID))
+			if _, err := tg.api.SendMessage(respMsg); err != nil {
+				logrus.Error(err)
+				continue
 			}
 		}
 	}
+}
+
+func (tg *TGBot) storeFile(fileID string, ext string) error {
+	rdr, err := tg.api.GetFD(fileID)
+	if err != nil {
+		return err
+	}
+	defer rdr.Close()
+
+	if _, err := tg.fileStorage.Store(context.Background(), rdr, ext); err != nil {
+		return err
+	}
+
+	if err := rdr.Close(); err != nil {
+		return err
+	}
+	return nil
 }

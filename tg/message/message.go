@@ -16,7 +16,8 @@ type Message struct {
 	Text           *string           `json:"text,omitempty"`
 	Chat           chat.Chat         `json:"chat"`
 	ReplyToMessage *Message          `json:"reply_to_message,omitempty"`
-	Photo          []*file.PhotoSize `json:"photo"`
+	Photo          []*file.PhotoSize `json:"photo,omitempty"`
+	Video          *file.Video       `json:"video,omitempty"`
 }
 
 type Option func(*Message)
