@@ -5,5 +5,9 @@ services:
     build:
       context: .
 
+    environment:
+      - STORAGE_TYPE=file
+      - STORAGE_PATH=media
+
     volumes:
       - ./media:/media
