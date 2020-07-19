@@ -8,6 +8,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws/external"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
@@ -171,4 +172,12 @@ func (s *S3Destenation) Store(ctx context.Context, f io.Reader, ext string) (str
 		return "", err
 	}
 	return path, nil
+}
+
+func (s *S3Destenation) PublicURL(ctx context.Context, p string) (string, error) {
+	req := s.cli.GetObjectRequest(&s3.GetObjectInput{
+		Bucket: aws.String(s.bucket),
+		Key:    aws.String(p),
+	})
+	return req.Presign(time.Hour)
 }

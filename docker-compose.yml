@@ -8,6 +8,7 @@ services:
     environment:
       - STORAGE_TYPE=file
       - STORAGE_PATH=media
+      - SECRET_KEY=secret
 
     volumes:
       - ./media:/media

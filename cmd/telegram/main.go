@@ -9,6 +9,7 @@ import (
 	"strings"
 	"syscall"
 	"vybar/destenation"
+	"vybar/symbol"
 	"vybar/tg"
 	"vybar/tg/file"
 	"vybar/tg/keyboard"
@@ -20,10 +21,16 @@ import (
 	"github.com/sirupsen/logrus"
 )
 
+const (
+	txtVote      = "Иду на участок!"
+	txtVolunteer = "Хочу помочь в подсчете!"
+)
+
 type Config struct {
 	TelegramToken string `envconfig:"TELEGRAM_TOKEN" required:"true"`
 	Verbose       bool   `envconfig:"VERBOSE"`
-	StorageType   string `envconfig:"STORAGE_TYPE"`
+	StorageType   string `envconfig:"STORAGE_TYPE" required:"true"`
+	SecretKey     string `envconfig:"SECRET_KEY" required:"true"`
 }
 
 type FSStorageParams struct {
@@ -114,16 +121,29 @@ func main() {
 		logrus.Info("Shutdown an app")
 	}()
 
+	gen, err := symbol.New(cfg.SecretKey)
+	if err != nil {
+		panic(err)
+	}
+
 	bot := TGBot{
-		api:         api,
-		fileStorage: dst,
+		api:              api,
+		fileStorage:      dst,
+		secretKey:        cfg.SecretKey,
+		generator:        gen,
+		userSalts:        make(map[int64]string),
+		userLastVideoURL: make(map[int64]string),
 	}
 	bot.Run(ctx)
 }
 
 type TGBot struct {
-	api         *tg.API
-	fileStorage destenation.Destenation
+	api              *tg.API
+	fileStorage      destenation.Destenation
+	secretKey        string
+	generator        *symbol.Generator
+	userSalts        map[int64]string
+	userLastVideoURL map[int64]string
 }
 
 func (tg *TGBot) Run(ctx context.Context) {
@@ -139,18 +159,29 @@ func (tg *TGBot) Run(ctx context.Context) {
 
 		txt := ""
 		if upd.Message.Text != nil {
-			txt = *upd.Message.Text
+			txt = strings.ToLower(strings.TrimSpace(*upd.Message.Text))
 		}
 
-		if strings.ToLower(strings.TrimSpace(txt)) == "/start" {
+		if txt == "/start" {
 			logrus.Debug("start working with new user")
-			tg.welcomeMessage(upd.Message.Chat.ID)
+			if err := tg.welcomeMessage(upd.Message.Chat.ID); err != nil {
+				logrus.Error(err)
+			}
 			continue
 		}
 
-		msg := message.Text(upd.Message.Chat.ID, fmt.Sprintf("echo: %s", txt), message.InReplyTo(upd.Message.ID))
-		if _, err := tg.api.SendMessage(msg); err != nil {
-			logrus.Error(err)
+		if txt == strings.ToLower(txtVote) {
+			if err := tg.processVoteRequest(ctx, upd.Message.Chat.ID); err != nil {
+				logrus.Error(err)
+			}
+			continue
+		}
+
+		if txt == strings.ToLower(txtVolunteer) {
+			if err := tg.processModeration(ctx, upd.Message.Chat.ID); err != nil {
+				logrus.Error(err)
+			}
+			continue
 		}
 
 		if upd.Message.Photo != nil {
@@ -167,7 +198,7 @@ func (tg *TGBot) Run(ctx context.Context) {
 			}
 
 			if maxSizeFile != nil {
-				if err := tg.storeFile(maxSizeFile.ID, "jpg"); err != nil {
+				if _, err := tg.storeFile(maxSizeFile.ID, "jpg"); err != nil {
 					logrus.Error(err)
 					continue
 				}
@@ -175,49 +206,115 @@ func (tg *TGBot) Run(ctx context.Context) {
 		}
 
 		if upd.Message.Video != nil {
-			logrus.Debug("got video")
-			spew.Dump(upd.Message.Video)
-			if err := tg.storeFile(upd.Message.Video.ID, "mp4"); err != nil {
+			if err := tg.processVideoMessage(ctx, upd.Message); err != nil {
 				logrus.Error(err)
-				respMsg := message.Text(upd.Message.Chat.ID, "При загрузке видео произошла ошибка, попробуйте еще раз", message.InReplyTo(upd.Message.ID))
-				if _, err := tg.api.SendMessage(respMsg); err != nil {
-					logrus.Error(err)
-				}
-				continue
 			}
-			respMsg := message.Text(upd.Message.Chat.ID, "Ваше видео успешно принято", message.InReplyTo(upd.Message.ID))
-			if _, err := tg.api.SendMessage(respMsg); err != nil {
-				logrus.Error(err)
-				continue
-			}
+			continue
 		}
 	}
 }
 
-func (tg *TGBot) storeFile(fileID string, ext string) error {
-	rdr, err := tg.api.GetFD(fileID)
+func (tg *TGBot) processVoteRequest(ctx context.Context, chatID int64) error {
+	logrus.Debug("generator")
+	id, err := tg.generator.Generate()
 	if err != nil {
 		return err
 	}
-	defer rdr.Close()
-
-	if _, err := tg.fileStorage.Store(context.Background(), rdr, ext); err != nil {
+	msg := message.Text(
+		chatID,
+		fmt.Sprintf(
+			`Взяв бюллетень и зайдя в кабинку, возьми свой телефон и включи видеозапись.
+Камеру направь на бюллетень, снимать нужно только его.
+Поставь в бланк напротив своего кандидата вместо галочки вот эти символы: %s.
+Не переживай, это абсолютно законно!
+Переверни бюллетень и сними его полностью.
+После этого, видеозапись можно завершить. Отправь свой бюллетень в урну.
+Обязательно загрузи видео сюда, сделать это можно в любое время. Однако чем раньше, тем лучше.
+Спасибо!
+			`,
+			id,
+		),
+	)
+	if _, err := tg.api.SendMessage(msg); err != nil {
 		return err
 	}
+	tg.userSalts[chatID] = id
+	return nil
+}
 
-	if err := rdr.Close(); err != nil {
+func (tg *TGBot) processVideoMessage(ctx context.Context, msg *message.Message) error {
+	logrus.Debug("got video")
+	spew.Dump(msg.Video)
+	p, err := tg.storeFile(msg.Video.ID, "mp4")
+	if err != nil {
+		respMsg := message.Text(
+			msg.Chat.ID, "При загрузке видео произошла ошибка, попробуйте еще раз",
+			message.InReplyTo(msg.ID),
+		)
+		if _, err := tg.api.SendMessage(respMsg); err != nil {
+			return err
+		}
+		return err
+	}
+	msgText := "Ваше видео успешно принято"
+	s3dst, ok := tg.fileStorage.(*destenation.S3Destenation)
+	options := []message.Option{message.InReplyTo(msg.ID)}
+	if ok {
+		u, err := s3dst.PublicURL(ctx, p)
+		if err != nil {
+			return err
+		}
+		options = append(options, message.WithKeyboard(
+			&keyboard.InlineMarkup{
+				Buttons: [][]keyboard.InlineButton{
+					{
+						{
+							Text: "▶️ Посмотреть",
+							URL:  u,
+						},
+					},
+				},
+			},
+		))
+		tg.userLastVideoURL[msg.Chat.ID] = u
+	}
+	respMsg := message.Text(msg.Chat.ID, msgText, options...)
+	if _, err := tg.api.SendMessage(respMsg); err != nil {
 		return err
 	}
 	return nil
 }
 
+func (tg *TGBot) storeFile(fileID string, ext string) (string, error) {
+	rdr, err := tg.api.GetFD(fileID)
+	if err != nil {
+		return "", err
+	}
+	defer rdr.Close()
+
+	p, err := tg.fileStorage.Store(context.Background(), rdr, ext)
+	if err != nil {
+		return "", err
+	}
+
+	if err := rdr.Close(); err != nil {
+		return "", err
+	}
+	return p, nil
+}
+
 func (tg *TGBot) welcomeMessage(chatID int64) error {
-	msg := message.Text(chatID, "Привет! Я знаю, как ты можешь защитить свой голос")
+	msg := message.Text(
+		chatID, "Привет! Я знаю, как ты можешь защитить свой голос",
+	)
 	if _, err := tg.api.SendMessage(msg); err != nil {
 		return err
 	}
 
-	msg = message.Text(chatID, "План очень прост! Тебе нужно лишь написать мне перед тем, как пойдешь на участок и я скажу тебе, что надо делать")
+	msg = message.Text(
+		chatID,
+		"План очень прост! Тебе нужно лишь написать мне перед тем, как пойдешь на участок и я скажу тебе, что надо делать",
+	)
 	if _, err := tg.api.SendMessage(msg); err != nil {
 		return err
 	}
@@ -227,11 +324,101 @@ func (tg *TGBot) welcomeMessage(chatID int64) error {
 		"А еще, если тебе очень хочется помочь в подсчете голосов - скажи мне об этом обязательно!",
 		message.WithKeyboard(
 			keyboard.NewReplyKeyboard(
-				keyboard.Row(keyboard.Button("Иду на участок!")),
-				keyboard.Row(keyboard.Button("Хочу помочь в подсчете!")),
+				keyboard.Row(keyboard.Button(txtVote)),
+				keyboard.Row(keyboard.Button(txtVolunteer)),
 				keyboard.Row(keyboard.Button("Можно подробнее?")),
 			),
 		),
+	)
+	if _, err := tg.api.SendMessage(msg); err != nil {
+		return err
+	}
+	return nil
+}
+
+func escape(s string) string {
+	return strings.ReplaceAll(s, `\`, `\\`)
+}
+
+func (tg *TGBot) processModeration(ctx context.Context, chatID int64) error {
+	msg := message.Text(chatID, "Спасибо что согласился помочь!")
+	if _, err := tg.api.SendMessage(msg); err != nil {
+		return err
+	}
+	noVideo := func() error {
+		msg := message.Text(chatID, "На данный момент у нас нет видео для валидации")
+		if _, err := tg.api.SendMessage(msg); err != nil {
+			return err
+		}
+		return nil
+	}
+
+	salt, ok := tg.userSalts[chatID]
+	if !ok {
+		return noVideo()
+	}
+	video, ok := tg.userLastVideoURL[chatID]
+	if !ok {
+		return noVideo()
+	}
+
+	msg = message.Text(
+		chatID,
+		fmt.Sprintf(`Пожалуйста, посмотри это [видео](%s) и убедись в следующих фактах:
+
+\* В этом видео видно бюллетень с двух сторон
+\* На этом бюллетени есть минимум две подписи членов избирательной комиссии
+\* В бюллетене отмечен только один кандидат
+\* Для отметки использовались символы: %s
+\* Ответь ниже, за какого кандидата поставлена отметка, либо сообщи, что видео не соответствует требованиям
+`, video, fmt.Sprintf("```%s```", escape(salt))),
+		message.Markdown(),
+		message.WithKeyboard(&keyboard.InlineMarkup{
+			Buttons: [][]keyboard.InlineButton{
+				{
+					{
+						Text: "Кандидат 1",
+						URL:  video,
+					},
+				},
+				{
+					{
+						Text: "Кандидат 2",
+						URL:  video,
+					},
+				},
+				{
+					{
+						Text: "Кандидат 3",
+						URL:  video,
+					},
+				},
+				{
+					{
+						Text: "Кандидат 4",
+						URL:  video,
+					},
+				},
+				{
+					{
+						Text: "Против всех",
+						URL:  video,
+					},
+				},
+				{
+					{
+						Text: "Бюллетень испорчен",
+						URL:  video,
+					},
+				},
+				{
+					{
+						Text: "Видео не соответствует требованиям",
+						URL:  video,
+					},
+				},
+			},
+		}),
 	)
 	if _, err := tg.api.SendMessage(msg); err != nil {
 		return err

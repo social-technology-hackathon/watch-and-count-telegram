@@ -279,8 +279,13 @@ func (api *API) SendMessage(msg *message.Message) (*message.Message, error) {
 		Text             string          `json:"text"`
 		ReplyToMessageID int             `json:"reply_to_message_id"`
 		ReplyMarkup      json.RawMessage `json:"reply_markup,omitempty"`
+		ParseMode        string          `json:"parse_mode"`
 	}{
 		ChatID: msg.Chat.ID,
+	}
+
+	if msg.Markdown {
+		req.ParseMode = "MarkdownV2"
 	}
 
 	if msg.Text != nil {

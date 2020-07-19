@@ -4,7 +4,6 @@ import (
 	"time"
 	"vybar/tg/chat"
 	"vybar/tg/file"
-	"vybar/tg/keyboard"
 	"vybar/tg/user"
 )
 
@@ -20,6 +19,7 @@ type Message struct {
 	Photo          []*file.PhotoSize `json:"photo,omitempty"`
 	Video          *file.Video       `json:"video,omitempty"`
 	ReplyMarkup    Keyboard          `json:"-"`
+	Markdown       bool              `json:"-"`
 }
 
 type Keyboard interface {
@@ -36,9 +36,15 @@ func InReplyTo(messageID int) Option {
 	}
 }
 
-func WithKeyboard(kb *keyboard.ReplyKeyboard) Option {
+func WithKeyboard(kb Keyboard) Option {
 	return func(msg *Message) {
 		msg.ReplyMarkup = kb
+	}
+}
+
+func Markdown() Option {
+	return func(msg *Message) {
+		msg.Markdown = true
 	}
 }
 
