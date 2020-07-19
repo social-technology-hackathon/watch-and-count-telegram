@@ -275,9 +275,10 @@ func (api *API) GetUpdatesChan(ctx context.Context, offset int) (<-chan Update, 
 
 func (api *API) SendMessage(msg *message.Message) (*message.Message, error) {
 	req := struct {
-		ChatID           int64  `json:"chat_id"`
-		Text             string `json:"text"`
-		ReplyToMessageID int    `json:"reply_to_message_id"`
+		ChatID           int64           `json:"chat_id"`
+		Text             string          `json:"text"`
+		ReplyToMessageID int             `json:"reply_to_message_id"`
+		ReplyMarkup      json.RawMessage `json:"reply_markup,omitempty"`
 	}{
 		ChatID: msg.Chat.ID,
 	}
@@ -288,6 +289,14 @@ func (api *API) SendMessage(msg *message.Message) (*message.Message, error) {
 
 	if msg.ReplyToMessage != nil {
 		req.ReplyToMessageID = msg.ReplyToMessage.ID
+	}
+
+	if msg.ReplyMarkup != nil {
+		d, err := msg.ReplyMarkup.Serialize()
+		if err != nil {
+			return nil, err
+		}
+		req.ReplyMarkup = d
 	}
 
 	r, err := api.newRequest(context.Background(), "POST", "sendMessage", &req)

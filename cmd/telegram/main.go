@@ -6,10 +6,12 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strings"
 	"syscall"
 	"vybar/destenation"
 	"vybar/tg"
 	"vybar/tg/file"
+	"vybar/tg/keyboard"
 	"vybar/tg/message"
 
 	"github.com/kelseyhightower/envconfig"
@@ -117,7 +119,6 @@ func main() {
 		fileStorage: dst,
 	}
 	bot.Run(ctx)
-
 }
 
 type TGBot struct {
@@ -139,6 +140,12 @@ func (tg *TGBot) Run(ctx context.Context) {
 		txt := ""
 		if upd.Message.Text != nil {
 			txt = *upd.Message.Text
+		}
+
+		if strings.ToLower(strings.TrimSpace(txt)) == "/start" {
+			logrus.Debug("start working with new user")
+			tg.welcomeMessage(upd.Message.Chat.ID)
+			continue
 		}
 
 		msg := message.Text(upd.Message.Chat.ID, fmt.Sprintf("echo: %s", txt), message.InReplyTo(upd.Message.ID))
@@ -199,6 +206,34 @@ func (tg *TGBot) storeFile(fileID string, ext string) error {
 	}
 
 	if err := rdr.Close(); err != nil {
+		return err
+	}
+	return nil
+}
+
+func (tg *TGBot) welcomeMessage(chatID int64) error {
+	msg := message.Text(chatID, "Привет! Я знаю, как ты можешь защитить свой голос")
+	if _, err := tg.api.SendMessage(msg); err != nil {
+		return err
+	}
+
+	msg = message.Text(chatID, "План очень прост! Тебе нужно лишь написать мне перед тем, как пойдешь на участок и я скажу тебе, что надо делать")
+	if _, err := tg.api.SendMessage(msg); err != nil {
+		return err
+	}
+
+	msg = message.Text(
+		chatID,
+		"А еще, если тебе очень хочется помочь в подсчете голосов - скажи мне об этом обязательно!",
+		message.WithKeyboard(
+			keyboard.NewReplyKeyboard(
+				keyboard.Row(keyboard.Button("Иду на участок!")),
+				keyboard.Row(keyboard.Button("Хочу помочь в подсчете!")),
+				keyboard.Row(keyboard.Button("Можно подробнее?")),
+			),
+		),
+	)
+	if _, err := tg.api.SendMessage(msg); err != nil {
 		return err
 	}
 	return nil

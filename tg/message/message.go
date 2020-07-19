@@ -4,6 +4,7 @@ import (
 	"time"
 	"vybar/tg/chat"
 	"vybar/tg/file"
+	"vybar/tg/keyboard"
 	"vybar/tg/user"
 )
 
@@ -18,6 +19,11 @@ type Message struct {
 	ReplyToMessage *Message          `json:"reply_to_message,omitempty"`
 	Photo          []*file.PhotoSize `json:"photo,omitempty"`
 	Video          *file.Video       `json:"video,omitempty"`
+	ReplyMarkup    Keyboard          `json:"-"`
+}
+
+type Keyboard interface {
+	Serialize() ([]byte, error)
 }
 
 type Option func(*Message)
@@ -27,6 +33,12 @@ func InReplyTo(messageID int) Option {
 		m.ReplyToMessage = &Message{
 			ID: messageID,
 		}
+	}
+}
+
+func WithKeyboard(kb *keyboard.ReplyKeyboard) Option {
+	return func(msg *Message) {
+		msg.ReplyMarkup = kb
 	}
 }
 
