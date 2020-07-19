@@ -14,6 +14,7 @@ services:
     environment:
       - VERBOSE=1
       - TELEGRAM_TOKEN=<bot token>
+      - SECRET_KEY=<your super secret key>
 ```
 
 ```bash
@@ -34,4 +35,5 @@ STORAGE_SECRET=  # required for s3 or spaces storage type, access secret key for
 STORAGE_ENDPOINT=  # required for spaces, endpoint for your bucket
 STORAGE_REGION=  # required fo s3, region for your bucket
 STORAGE_BUCKET=  # required for s3 or spaces storage type, bucket name
+SECRET_KEY=  # required, security purposes
 ```
